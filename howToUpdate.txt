@@ -1,0 +1,2 @@
+Stop-Process -Name "python" -Force -ErrorAction SilentlyContinue
+.\backend\venv\Scripts\python.exe backend/server.py

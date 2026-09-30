@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zany Downloader — YouTube Downloader</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="wrapper">
+        <div class="container">
+            <header class="header">
+                <h1>Zany<span class="accent">Downloader</span></h1>
+                <p>Скачивай видео и аудио с YouTube в пару кликов</p>
+            </header>
+
+            <main class="downloader-card">
+                <div class="input-group">
+                    <input type="text" id="urlInput" placeholder="Вставь ссылку на YouTube (например, https://youtu.be/...)" autocomplete="off">
+                    <button id="fetchBtn" class="btn-primary">Найти</button>
+                </div>
+
+                <div id="optionsContainer" class="options-container hidden">
+                    <div class="video-info">
+                        <img id="videoThumbnail" src="" alt="Thumbnail">
+                        <div class="video-details">
+                            <h3 id="videoTitle">Название видео подгрузится здесь</h3>
+                            <p id="videoDuration">Длительность: --:--</p>
+                        </div>
+                    </div>
+
+                    <div class="setting-item" style="margin-bottom: 15px;">
+                        <label for="titleInput">Название файла</label>
+                        <input type="text" id="titleInput" placeholder="Введите название файла" autocomplete="off">
+                    </div>
+
+                    <div class="settings-row" style="margin-bottom: 15px;">
+                        <div class="setting-item">
+                            <label for="formatSelect">Формат</label>
+                            <select id="formatSelect">
+                                <option value="video">Видео (MP4)</option>
+                                <option value="audio">Аудио (MP3)</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-item" id="qualityContainer">
+                            <label for="qualitySelect">Качество</label>
+                            <select id="qualitySelect">
+                                <option value="1080">1080p (Full HD)</option>
+                                <option value="720" selected>720p (HD)</option>
+                                <option value="480">480p</option>
+                                <option value="360">360p</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button id="downloadBtn" class="btn-success">Скачать файл</button>
+
+                    <div id="progressContainer" class="progress-container hidden">
+                        <div class="progress-info">
+                            <span id="progressText">Скачивание... 0%</span>
+                            <span id="progressSpeed">0 МБ/с</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div id="progressBarFill" class="progress-bar-fill"></div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <footer class="footer">
+                <p>Zany Downloader • Вайбкодинг проект</p>
+            </footer>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
