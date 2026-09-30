@@ -59,10 +59,24 @@
                     <div id="progressContainer" class="progress-container hidden">
                         <div class="progress-info">
                             <span id="progressText">Скачивание... 0%</span>
-                            <span id="progressSpeed">0 МБ/с</span>
+                            <span id="progressSpeed" class="progress-badge">Подготовка</span>
                         </div>
                         <div class="progress-bar-bg">
                             <div id="progressBarFill" class="progress-bar-fill"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <div class="stat-card">
+                                <span class="stat-label">Скачано</span>
+                                <span id="statDownloaded" class="stat-value">—</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Скорость</span>
+                                <span id="statSpeed" class="stat-value stat-speed">—</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Осталось</span>
+                                <span id="statEta" class="stat-value stat-eta">—</span>
+                            </div>
                         </div>
                     </div>
                 </div>

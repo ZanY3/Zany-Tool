@@ -16,6 +16,62 @@ const progressContainer = document.getElementById('progressContainer');
 const progressBarFill = document.getElementById('progressBarFill');
 const progressText = document.getElementById('progressText');
 const progressSpeed = document.getElementById('progressSpeed');
+const statDownloaded = document.getElementById('statDownloaded');
+const statSpeed = document.getElementById('statSpeed');
+const statEta = document.getElementById('statEta');
+
+function formatBytes(bytes) {
+    if (!bytes || bytes < 0) return '0 МБ';
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1024) return (mb / 1024).toFixed(2) + ' ГБ';
+    return mb.toFixed(1) + ' МБ';
+}
+
+function formatEta(seconds) {
+    if (seconds === null || seconds === undefined || !isFinite(seconds)) return '—';
+    seconds = Math.max(0, Math.round(seconds));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function resetStats() {
+    statDownloaded.textContent = '—';
+    statSpeed.textContent = '—';
+    statEta.textContent = '—';
+}
+
+function makeProgressId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'p' + Date.now() + Math.random().toString(16).slice(2);
+}
+
+function applyServerProgress(p) {
+    if (p.stage === 'processing') {
+        progressBarFill.style.width = '100%';
+        progressText.textContent = 'Обработка файла...';
+        progressSpeed.textContent = 'Обработка';
+        statSpeed.textContent = '—';
+        statEta.textContent = '—';
+        return;
+    }
+
+    const percent = Math.min(100, Math.round(p.percent || 0));
+    const isAudio = p.kind === 'audio';
+    progressBarFill.style.width = `${percent}%`;
+    progressText.textContent = `Скачивание ${isAudio ? 'аудио' : 'видео'}... ${percent}%`;
+    progressSpeed.textContent = isAudio ? 'Аудио' : 'Видео';
+
+    const done = p.total ? Math.min(p.downloaded || 0, p.total) : (p.downloaded || 0);
+    statDownloaded.textContent = p.total
+        ? `${formatBytes(done)} / ${formatBytes(p.total)}`
+        : formatBytes(done);
+    statSpeed.textContent = p.speed ? `${formatBytes(p.speed)}/с` : '—';
+    statEta.textContent = formatEta(p.eta);
+}
+
 
 formatSelect.addEventListener('change', () => {
     if (formatSelect.value === 'audio') {
@@ -78,20 +134,27 @@ downloadBtn.addEventListener('click', async () => {
     formatSelect.disabled = true;
     qualitySelect.disabled = true;
 
+    const progressId = makeProgressId();
+    let pollingActive = true;
+
     progressContainer.classList.remove('hidden');
     progressBarFill.style.width = '0%';
-    progressText.textContent = 'Скачивание с YouTube... 10%';
-    progressSpeed.textContent = 'Обработка';
+    progressText.textContent = 'Подключение к YouTube... 0%';
+    progressSpeed.textContent = 'Подготовка';
+    resetStats();
 
-    let fakePercent = 10;
-    const progressInterval = setInterval(() => {
-        if (fakePercent < 80) {
-            fakePercent += Math.floor(Math.random() * 8) + 3;
-            if (fakePercent > 80) fakePercent = 80;
-            progressBarFill.style.width = `${fakePercent}%`;
-            progressText.textContent = `Скачивание с YouTube... ${fakePercent}%`;
+    // Реальный прогресс с сервера (yt-dlp), опрашиваем дважды в секунду
+    const progressInterval = setInterval(async () => {
+        try {
+            const r = await fetch(`/api/progress/${progressId}`, { cache: 'no-store' });
+            if (!r.ok || !pollingActive) return;
+            const p = await r.json();
+            if (!pollingActive || !p.stage) return;
+            applyServerProgress(p);
+        } catch (e) {
+            // пропускаем единичные сбои опроса
         }
-    }, 300);
+    }, 500);
 
     try {
         const response = await fetch('/api/download', {
@@ -101,10 +164,12 @@ downloadBtn.addEventListener('click', async () => {
                 url: currentVideoData.url,
                 format: format,
                 quality: quality,
-                title: customTitle
+                title: customTitle,
+                progress_id: progressId
             })
         });
 
+        pollingActive = false;
         clearInterval(progressInterval);
 
         if (!response.ok) {
@@ -112,9 +177,10 @@ downloadBtn.addEventListener('click', async () => {
             throw new Error(errData.error || 'Ошибка скачивания');
         }
 
-        progressBarFill.style.width = '85%';
-        progressText.textContent = 'Передача файла на ваш ПК... 85%';
-        progressSpeed.textContent = '';
+        progressBarFill.style.width = '0%';
+        progressText.textContent = 'Передача файла на ваш ПК... 0%';
+        progressSpeed.textContent = 'Передача';
+        resetStats();
 
         const contentLength = response.headers.get('Content-Length');
         const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
@@ -131,22 +197,25 @@ downloadBtn.addEventListener('click', async () => {
             chunks.push(value);
             receivedBytes += value.length;
 
-            if (totalBytes > 0) {
-                const downloadPercent = Math.round((receivedBytes / totalBytes) * 15);
-                const totalPercent = 85 + downloadPercent;
-                progressBarFill.style.width = `${totalPercent}%`;
-                progressText.textContent = `Сохранение файла... ${totalPercent}%`;
-            }
-
             const elapsedSeconds = (Date.now() - startTime) / 1000;
-            if (elapsedSeconds > 0) {
-                const speedMbps = ((receivedBytes / (1024 * 1024)) / elapsedSeconds).toFixed(1);
-                progressSpeed.textContent = `${speedMbps} МБ/с`;
+            const speed = elapsedSeconds > 0 ? receivedBytes / elapsedSeconds : 0;
+
+            if (totalBytes > 0) {
+                const totalPercent = Math.round((receivedBytes / totalBytes) * 100);
+                progressBarFill.style.width = `${totalPercent}%`;
+                progressText.textContent = `Передача файла на ваш ПК... ${totalPercent}%`;
+                statDownloaded.textContent = `${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`;
+                statEta.textContent = speed > 0 ? formatEta((totalBytes - receivedBytes) / speed) : '—';
+            } else {
+                statDownloaded.textContent = formatBytes(receivedBytes);
             }
+            statSpeed.textContent = speed > 0 ? `${formatBytes(speed)}/с` : '—';
         }
 
         progressBarFill.style.width = '100%';
         progressText.textContent = 'Готово! Загрузка завершена';
+        progressSpeed.textContent = 'Готово';
+        statEta.textContent = '0:00';
 
         const blob = new Blob(chunks);
         const fileExtension = format === 'audio' ? 'mp3' : 'mp4';
@@ -162,6 +231,7 @@ downloadBtn.addEventListener('click', async () => {
         URL.revokeObjectURL(downloadUrl);
 
     } catch (err) {
+        pollingActive = false;
         clearInterval(progressInterval);
         alert('Ошибка при скачивании: ' + err.message);
     } finally {

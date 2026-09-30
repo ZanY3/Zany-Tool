@@ -25,6 +25,60 @@ CORS(app)
 # 'default' оставляет стандартный набор клиентов, 'web_safari' добавляем сверху.
 YOUTUBE_ARGS = {'youtube': {'player_client': ['default', 'web_safari']}}
 
+# Прогресс скачивания: {progress_id: {...}}. Сайт опрашивает его через /api/progress/<id>
+PROGRESS = {}
+PROGRESS_LOCK = threading.Lock()
+
+
+def make_progress_hooks(progress_id):
+    def update(**kw):
+        with PROGRESS_LOCK:
+            PROGRESS.setdefault(progress_id, {}).update(kw)
+
+    def on_progress(d):
+        info = d.get('info_dict') or {}
+        if info.get('vcodec') not in (None, 'none'):
+            kind = 'video'
+        elif info.get('acodec') not in (None, 'none'):
+            kind = 'audio'
+        else:
+            kind = 'video'
+
+        if d.get('status') == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+            done = d.get('downloaded_bytes') or 0
+            if total:
+                percent = min(done / total * 100, 100)
+            elif d.get('fragment_count'):
+                percent = (d.get('fragment_index') or 0) / d['fragment_count'] * 100
+            else:
+                percent = 0
+            update(stage='downloading', kind=kind, percent=round(percent, 1),
+                   downloaded=done, total=total,
+                   speed=d.get('speed') or 0, eta=d.get('eta'))
+        elif d.get('status') == 'finished':
+            total = d.get('total_bytes') or d.get('downloaded_bytes') or 0
+            update(stage='downloading', kind=kind, percent=100,
+                   downloaded=total, total=total, speed=0, eta=0)
+
+    def on_postprocess(d):
+        if d.get('status') == 'started':
+            update(stage='processing')
+
+    return on_progress, on_postprocess
+
+
+def clear_progress(progress_id):
+    if progress_id:
+        with PROGRESS_LOCK:
+            PROGRESS.pop(progress_id, None)
+
+
+@app.route('/api/progress/<progress_id>')
+def get_progress(progress_id):
+    with PROGRESS_LOCK:
+        return jsonify(PROGRESS.get(progress_id, {}))
+
 
 @app.route('/')
 def index():
@@ -64,6 +118,7 @@ def download_video():
     format_type = data.get('format', 'video')
     quality = str(data.get('quality', '720'))
     title = data.get('title', 'video')
+    progress_id = str(data.get('progress_id') or '')[:64]
 
     if not url:
         return jsonify({'error': 'URL не указан'}), 400
@@ -110,9 +165,15 @@ def download_video():
             'extractor_args': YOUTUBE_ARGS,
         }
 
+    if progress_id:
+        on_progress, on_postprocess = make_progress_hooks(progress_id)
+        ydl_opts['progress_hooks'] = [on_progress]
+        ydl_opts['postprocessor_hooks'] = [on_postprocess]
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(url, download=True)
+        clear_progress(progress_id)
 
         files = os.listdir(tmp_dir)
         if not files:
@@ -141,6 +202,7 @@ def download_video():
         return Response(file_stream(), headers=headers, mimetype='application/octet-stream')
 
     except Exception as e:
+        clear_progress(progress_id)
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return jsonify({'error': str(e)}), 500
 

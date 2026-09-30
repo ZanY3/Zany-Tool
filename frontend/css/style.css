@@ -248,3 +248,62 @@ select:focus {
     background-color: var(--success-color);
     transition: width 0.1s linear;
 }
+
+.progress-badge {
+    background-color: rgba(121, 82, 239, 0.15);
+    color: var(--accent-color);
+    border: 1px solid rgba(121, 82, 239, 0.3);
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.progress-stats {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.stat-card {
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.stat-label {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.stat-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-speed {
+    color: var(--success-color);
+}
+
+.stat-eta {
+    color: var(--accent-color);
+}
+
+@media (max-width: 520px) {
+    .progress-stats {
+        grid-template-columns: 1fr;
+    }
+}
