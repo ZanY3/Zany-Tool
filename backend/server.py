@@ -1,39 +1,49 @@
 import os
-import sys
+import shutil
+import tempfile
+import threading
+import webbrowser
 from urllib.parse import quote
+
+import yt_dlp
 from flask import Flask, request, Response, jsonify, render_template
 from flask_cors import CORS
-import yt_dlp
-import webbrowser
-import threading
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, '..', 'frontend'))
 
 app = Flask(
-    __name__, 
-    static_folder=FRONTEND_DIR, 
-    static_url_path='', 
+    __name__,
+    static_folder=FRONTEND_DIR,
+    static_url_path='',
     template_folder=FRONTEND_DIR
 )
 CORS(app)
+
+# Свежие версии yt-dlp (2026.08.19+) по умолчанию убрали клиент web_safari,
+# а именно он отдаёт HD (HLS, до 1080p) там, где остальные клиенты дают только 360p.
+# 'default' оставляет стандартный набор клиентов, 'web_safari' добавляем сверху.
+YOUTUBE_ARGS = {'youtube': {'player_client': ['default', 'web_safari']}}
+
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+
 @app.route('/api/fetch', methods=['POST'])
 def fetch_video_info():
-    data = request.json
+    data = request.json or {}
     url = data.get('url')
     if not url:
         return jsonify({'error': 'URL не указан'}), 400
     try:
+        # Без extractor_args: свежий yt-dlp сам выбирает рабочие клиенты YouTube
         ydl_opts = {
             'noplaylist': True,
             'skip_download': True,
-            # Используем tv, web и android — они не крашатся на проверках токенов
-            'extractor_args': {'youtube': {'player_client': ['tv', 'web', 'android']}}
+            'quiet': True,
+            'extractor_args': YOUTUBE_ARGS,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -46,92 +56,102 @@ def fetch_video_info():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/download', methods=['POST'])
 def download_video():
-    data = request.json
+    data = request.json or {}
     url = data.get('url')
     format_type = data.get('format', 'video')
-    quality = data.get('quality', '720')  
+    quality = str(data.get('quality', '720'))
     title = data.get('title', 'video')
 
     if not url:
         return jsonify({'error': 'URL не указан'}), 400
 
-    safe_title = "".join([c for c in title if c.isalnum() or c.isspace()]).rstrip() or "media"
+    if not quality.isdigit():
+        quality = '720'
+
+    safe_title = "".join(c for c in title if c.isalnum() or c.isspace()).strip() or "media"
+
+    # Каждая загрузка идёт в свою временную папку, чтобы файлы не путались
+    tmp_dir = tempfile.mkdtemp(prefix='zany_')
+    outtmpl = os.path.join(tmp_dir, 'media.%(ext)s')
 
     if format_type == 'audio':
         ydl_opts = {
             'format': 'bestaudio/best',
-            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-            'outtmpl': os.path.join(BASE_DIR, f'{safe_title}.%(ext)s'),
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': outtmpl,
             'noplaylist': True,
-            'extractor_args': {'youtube': {'player_client': ['tv', 'web', 'android']}}
+            'quiet': True,
+            'extractor_args': YOUTUBE_ARGS,
         }
     else:
-        # НЕУБИВАЕМЫЙ СЕЛЕКТОР:
-        # Пробует найти раздельные видео+аудио нужного качества. 
-        # Если их нет (YouTube заблокировал HD), скачивает просто лучшее доступное видео (best).
-        fallback_format = f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best'
-        
+        # Порядок попыток:
+        # 1) mp4-видео + m4a-аудио нужного качества (лучше всего совместимо)
+        # 2) любое видео + любое аудио не выше выбранного качества
+        # 3) готовый муксованный файл не выше выбранного качества
+        # Финального "/best" нет специально: если выбранного качества нет,
+        # получишь честную ошибку, а не тихий 360p.
         ydl_opts = {
-            'format': fallback_format,
+            'format': (
+                f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/'
+                f'bestvideo[height<={quality}]+bestaudio/'
+                f'best[height<={quality}]'
+            ),
             'merge_output_format': 'mp4',
-            'outtmpl': os.path.join(BASE_DIR, f'{safe_title}.%(ext)s'),
+            'outtmpl': outtmpl,
             'noplaylist': True,
-            'extractor_args': {'youtube': {'player_client': ['tv', 'web', 'android']}}
+            'quiet': True,
+            'extractor_args': YOUTUBE_ARGS,
         }
 
-    def generate():
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(url, download=True)
 
-            base_name, _ = os.path.splitext(filename)
-            mp4_filename = f"{base_name}.mp4"
+        files = os.listdir(tmp_dir)
+        if not files:
+            raise Exception("Файл не был создан после скачивания")
 
-            if os.path.exists(mp4_filename):
-                filename = mp4_filename
-            elif not os.path.exists(filename):
-                found = False
-                for f in os.listdir(BASE_DIR):
-                    if f.startswith(safe_title):
-                        filename = os.path.join(BASE_DIR, f)
-                        found = True
-                        break
-                if not found:
-                    raise Exception("Файл не был создан после скачивания")
+        # Берём итоговый файл (для аудио это mp3, для видео mp4)
+        preferred = [f for f in files if f.endswith(('.mp4', '.mp3'))]
+        filename = os.path.join(tmp_dir, (preferred or files)[0])
 
-            actual_ext = os.path.splitext(filename)[1].lstrip('.')
-            download_filename = f"{safe_title}.{actual_ext}"
+        actual_ext = os.path.splitext(filename)[1].lstrip('.')
+        download_filename = f"{safe_title}.{actual_ext}"
+        file_size = os.path.getsize(filename)
 
-            file_size = os.path.getsize(filename)
-            def file_stream():
-                try:
-                    with open(filename, 'rb') as f:
-                        while chunk := f.read(1024 * 64):
-                            yield chunk
-                finally:
-                    if os.path.exists(filename):
-                        try: os.remove(filename)
-                        except: pass
+        def file_stream():
+            try:
+                with open(filename, 'rb') as f:
+                    while chunk := f.read(1024 * 64):
+                        yield chunk
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
-            encoded_filename = quote(download_filename)
-            headers = {
-                'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
-                'Content-Length': str(file_size)
-            }
-            return Response(file_stream(), headers=headers, mimetype='application/octet-stream')
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+        headers = {
+            'Content-Disposition': f"attachment; filename*=UTF-8''{quote(download_filename)}",
+            'Content-Length': str(file_size),
+        }
+        return Response(file_stream(), headers=headers, mimetype='application/octet-stream')
 
-    return generate()
+    except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return jsonify({'error': str(e)}), 500
+
 
 def format_duration(seconds):
-    if not seconds: return "0:00"
+    if not seconds:
+        return "0:00"
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     return f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m}:{s:02d}"
+
 
 if __name__ == '__main__':
     threading.Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5001')).start()
