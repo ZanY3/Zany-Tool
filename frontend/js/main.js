@@ -143,7 +143,6 @@ downloadBtn.addEventListener('click', async () => {
     progressSpeed.textContent = 'Подготовка';
     resetStats();
 
-    // Реальный прогресс с сервера (yt-dlp), опрашиваем дважды в секунду
     const progressInterval = setInterval(async () => {
         try {
             const r = await fetch(`/api/progress/${progressId}`, { cache: 'no-store' });
@@ -152,7 +151,6 @@ downloadBtn.addEventListener('click', async () => {
             if (!pollingActive || !p.stage) return;
             applyServerProgress(p);
         } catch (e) {
-            // пропускаем единичные сбои опроса
         }
     }, 500);
 

@@ -21,12 +21,8 @@ app = Flask(
 )
 CORS(app)
 
-# Свежие версии yt-dlp (2026.08.19+) по умолчанию убрали клиент web_safari,
-# а именно он отдаёт HD (HLS, до 1080p) там, где остальные клиенты дают только 360p.
-# 'default' оставляет стандартный набор клиентов, 'web_safari' добавляем сверху.
 YOUTUBE_ARGS = {'youtube': {'player_client': ['default', 'web_safari']}}
 
-# Прогресс скачивания: {progress_id: {...}}. Сайт опрашивает его через /api/progress/<id>
 PROGRESS = {}
 PROGRESS_LOCK = threading.Lock()
 
@@ -93,7 +89,6 @@ def fetch_video_info():
     if not url:
         return jsonify({'error': 'URL не указан'}), 400
     try:
-        # Без extractor_args: свежий yt-dlp сам выбирает рабочие клиенты YouTube
         ydl_opts = {
             'noplaylist': True,
             'skip_download': True,
@@ -129,7 +124,6 @@ def download_video():
 
     safe_title = "".join(c for c in title if c.isalnum() or c.isspace()).strip() or "media"
 
-    # Каждая загрузка идёт в свою временную папку, чтобы файлы не путались
     tmp_dir = tempfile.mkdtemp(prefix='zany_')
     outtmpl = os.path.join(tmp_dir, 'media.%(ext)s')
 
@@ -147,12 +141,6 @@ def download_video():
             'extractor_args': YOUTUBE_ARGS,
         }
     else:
-        # Порядок попыток:
-        # 1) mp4-видео + m4a-аудио нужного качества (лучше всего совместимо)
-        # 2) любое видео + любое аудио не выше выбранного качества
-        # 3) готовый муксованный файл не выше выбранного качества
-        # Финального "/best" нет специально: если выбранного качества нет,
-        # получишь честную ошибку, а не тихий 360p.
         ydl_opts = {
             'format': (
                 f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/'
@@ -180,7 +168,6 @@ def download_video():
         if not files:
             raise Exception("Файл не был создан после скачивания")
 
-        # Берём итоговый файл (для аудио это mp3, для видео mp4)
         preferred = [f for f in files if f.endswith(('.mp4', '.mp3'))]
         filename = os.path.join(tmp_dir, (preferred or files)[0])
 
@@ -207,8 +194,6 @@ def download_video():
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return jsonify({'error': str(e)}), 500
 
-
-# ======================= КОНВЕРТЕР (ffmpeg) =======================
 
 IMAGE_IN = {'jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff', 'ico'}
 VIDEO_IN = {'mp4', 'mkv', 'webm', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', '3gp', 'ts'}
@@ -265,7 +250,6 @@ def codec_args(target, quality):
     q = quality if quality in ('high', 'medium', 'low') else 'medium'
     abr = {'high': '320k', 'medium': '192k', 'low': '128k'}[q]
 
-    # ----- аудио -----
     if target in AUDIO_OUT:
         args = ['-map', '0:a:0', '-vn']
         if target == 'mp3':
@@ -282,7 +266,6 @@ def codec_args(target, quality):
             args += ['-c:a', 'libopus', '-b:a', {'high': '192k', 'medium': '128k', 'low': '96k'}[q]]
         return args
 
-    # ----- изображения -----
     if target in IMAGE_OUT:
         if target == 'jpg':
             return ['-frames:v', '1', '-q:v', {'high': '2', 'medium': '5', 'low': '10'}[q]]
@@ -290,9 +273,8 @@ def codec_args(target, quality):
             return ['-quality', {'high': '95', 'medium': '80', 'low': '60'}[q]]
         if target == 'gif':
             return []
-        return ['-frames:v', '1']  # png, bmp, tiff
+        return ['-frames:v', '1']
 
-    # ----- видео -----
     base = ['-map', '0:v:0', '-map', '0:a:0?']
     crf = {'high': '18', 'medium': '23', 'low': '28'}[q]
     if target in ('mp4', 'mov', 'mkv'):

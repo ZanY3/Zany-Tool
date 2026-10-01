@@ -1,6 +1,4 @@
-// Вкладки и конвертер. Используются formatBytes / formatEta / makeProgressId из main.js
 (function () {
-    // ---------- Вкладки ----------
     const tabButtons = document.querySelectorAll('.tab-btn');
     const tabPanels = document.querySelectorAll('[id$="Tab"]');
 
@@ -13,7 +11,6 @@
         });
     });
 
-    // ---------- Форматы ----------
     const IMAGE_IN = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff', 'ico'];
     const VIDEO_IN = ['mp4', 'mkv', 'webm', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', '3gp', 'ts'];
     const AUDIO_IN = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma', 'aiff', 'aif', 'amr'];
@@ -22,12 +19,10 @@
     const VIDEO_OUT = ['mp4', 'mkv', 'webm', 'avi', 'mov', 'gif'];
     const AUDIO_OUT = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus'];
 
-    // Форматы, у которых выбор качества не имеет смысла
     const NO_QUALITY = ['wav', 'flac', 'png', 'bmp', 'tiff', 'gif'];
 
     const CATEGORY_LABEL = { image: 'ФОТО', video: 'ВИДЕО', audio: 'АУДИО' };
 
-    // ---------- Элементы ----------
     const dropzone = document.getElementById('convDropzone');
     const dropzoneTitle = document.getElementById('convDropzoneTitle');
     const fileInput = document.getElementById('convFileInput');
@@ -90,7 +85,6 @@
             list.forEach((f) => addOption(formatSelect, f, f.toUpperCase()));
         }
 
-        // По умолчанию выбираем первый формат, отличный от исходного
         const normalizedInput = inputExt === 'jpeg' ? 'jpg' : inputExt === 'tif' ? 'tiff' : inputExt;
         const firstDifferent = Array.from(formatSelect.options).find((o) => o.value !== normalizedInput);
         if (firstDifferent) formatSelect.value = firstDifferent.value;
@@ -144,7 +138,6 @@
         if (e.dataTransfer.files && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
     });
 
-    // ---------- Отображение прогресса ----------
     function resetStats(label) {
         statLabel.textContent = label;
         statDone.textContent = '—';
@@ -193,7 +186,6 @@
         URL.revokeObjectURL(url);
     }
 
-    // ---------- Конвертация ----------
     convertBtn.addEventListener('click', () => {
         if (!selectedFile) return;
 
@@ -230,7 +222,6 @@
                     if (!pollingActive || p.stage !== 'converting') return;
                     applyConvertProgress(p);
                 } catch (e) {
-                    // единичные сбои опроса пропускаем
                 }
             }, 500);
         }
@@ -260,7 +251,6 @@
         xhr.open('POST', '/api/convert');
         xhr.responseType = 'blob';
 
-        // 1) Загрузка файла на сервер
         xhr.upload.onprogress = (e) => {
             if (!e.lengthComputable) return;
             const percent = Math.round((e.loaded / e.total) * 100);
@@ -273,7 +263,6 @@
             statEta.textContent = speed > 0 ? formatEta((e.total - e.loaded) / speed) : '—';
         };
 
-        // 2) Сервер конвертирует: опрашиваем прогресс
         xhr.upload.onload = () => {
             phase = 'convert';
             progressBadge.textContent = 'Конвертация';
@@ -283,7 +272,6 @@
             startPolling();
         };
 
-        // 3) Сервер начал отдавать готовый файл
         xhr.onreadystatechange = () => {
             if (xhr.readyState === xhr.HEADERS_RECEIVED && xhr.status === 200) {
                 stopPolling();
