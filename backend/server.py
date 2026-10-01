@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import webbrowser
@@ -195,6 +196,218 @@ def download_video():
             finally:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
 
+        headers = {
+            'Content-Disposition': f"attachment; filename*=UTF-8''{quote(download_filename)}",
+            'Content-Length': str(file_size),
+        }
+        return Response(file_stream(), headers=headers, mimetype='application/octet-stream')
+
+    except Exception as e:
+        clear_progress(progress_id)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return jsonify({'error': str(e)}), 500
+
+
+# ======================= КОНВЕРТЕР (ffmpeg) =======================
+
+IMAGE_IN = {'jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff', 'ico'}
+VIDEO_IN = {'mp4', 'mkv', 'webm', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', '3gp', 'ts'}
+AUDIO_IN = {'mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma', 'aiff', 'aif', 'amr'}
+
+IMAGE_OUT = {'jpg', 'png', 'webp', 'bmp', 'gif', 'tiff'}
+VIDEO_OUT = {'mp4', 'mkv', 'webm', 'avi', 'mov', 'gif'}
+AUDIO_OUT = {'mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus'}
+
+CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+
+
+def set_progress(progress_id, **kw):
+    if progress_id:
+        with PROGRESS_LOCK:
+            PROGRESS.setdefault(progress_id, {}).update(kw)
+
+
+def detect_category(ext):
+    if ext in IMAGE_IN:
+        return 'image'
+    if ext in VIDEO_IN:
+        return 'video'
+    if ext in AUDIO_IN:
+        return 'audio'
+    return None
+
+
+def allowed_targets(category):
+    if category == 'image':
+        return IMAGE_OUT
+    if category == 'audio':
+        return AUDIO_OUT
+    return VIDEO_OUT | AUDIO_OUT
+
+
+def get_duration(src):
+    ffprobe = shutil.which('ffprobe')
+    if not ffprobe:
+        return 0
+    try:
+        out = subprocess.run(
+            [ffprobe, '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', src],
+            capture_output=True, text=True, timeout=20,
+            creationflags=CREATE_NO_WINDOW
+        )
+        return float(out.stdout.strip())
+    except Exception:
+        return 0
+
+
+def codec_args(target, quality):
+    q = quality if quality in ('high', 'medium', 'low') else 'medium'
+    abr = {'high': '320k', 'medium': '192k', 'low': '128k'}[q]
+
+    # ----- аудио -----
+    if target in AUDIO_OUT:
+        args = ['-map', '0:a:0', '-vn']
+        if target == 'mp3':
+            args += ['-c:a', 'libmp3lame', '-b:a', abr]
+        elif target == 'wav':
+            args += ['-c:a', 'pcm_s16le']
+        elif target == 'flac':
+            args += ['-c:a', 'flac']
+        elif target == 'ogg':
+            args += ['-c:a', 'libvorbis', '-q:a', {'high': '7', 'medium': '5', 'low': '3'}[q]]
+        elif target in ('m4a', 'aac'):
+            args += ['-c:a', 'aac', '-b:a', abr]
+        elif target == 'opus':
+            args += ['-c:a', 'libopus', '-b:a', {'high': '192k', 'medium': '128k', 'low': '96k'}[q]]
+        return args
+
+    # ----- изображения -----
+    if target in IMAGE_OUT:
+        if target == 'jpg':
+            return ['-frames:v', '1', '-q:v', {'high': '2', 'medium': '5', 'low': '10'}[q]]
+        if target == 'webp':
+            return ['-quality', {'high': '95', 'medium': '80', 'low': '60'}[q]]
+        if target == 'gif':
+            return []
+        return ['-frames:v', '1']  # png, bmp, tiff
+
+    # ----- видео -----
+    base = ['-map', '0:v:0', '-map', '0:a:0?']
+    crf = {'high': '18', 'medium': '23', 'low': '28'}[q]
+    if target in ('mp4', 'mov', 'mkv'):
+        args = base + ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', crf,
+                       '-pix_fmt', 'yuv420p',
+                       '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+                       '-c:a', 'aac', '-b:a', '192k']
+        if target in ('mp4', 'mov'):
+            args += ['-movflags', '+faststart']
+        return args
+    if target == 'webm':
+        return base + ['-c:v', 'libvpx-vp9', '-crf', {'high': '28', 'medium': '33', 'low': '38'}[q],
+                       '-b:v', '0', '-row-mt', '1', '-deadline', 'good', '-cpu-used', '4',
+                       '-c:a', 'libopus', '-b:a', '128k']
+    if target == 'avi':
+        return base + ['-c:v', 'mpeg4', '-q:v', {'high': '2', 'medium': '4', 'low': '8'}[q],
+                       '-c:a', 'libmp3lame', '-b:a', '192k']
+    if target == 'gif':
+        return ['-map', '0:v:0', '-an', '-vf', 'fps=12,scale=480:-1:flags=lanczos', '-loop', '0']
+    return []
+
+
+def run_ffmpeg(cmd, duration, progress_id):
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding='utf-8', errors='replace',
+        creationflags=CREATE_NO_WINDOW
+    )
+    state = {}
+    log = []
+    set_progress(progress_id, stage='converting', percent=0, known=bool(duration),
+                 done_sec=0, duration=duration, speed_x=0, eta=None)
+
+    for raw in proc.stdout:
+        line = raw.strip()
+        if not line:
+            continue
+        if '=' in line and ' ' not in line.split('=', 1)[0]:
+            key, value = line.split('=', 1)
+            state[key] = value
+            if key == 'progress':
+                us = state.get('out_time_us') or state.get('out_time_ms') or ''
+                try:
+                    done_sec = max(int(us) / 1_000_000, 0)
+                except ValueError:
+                    done_sec = 0
+                try:
+                    speed_x = float(state.get('speed', '').replace('x', '').strip() or 0)
+                except ValueError:
+                    speed_x = 0
+                if duration:
+                    percent = min(done_sec / duration * 100, 100)
+                    eta = (duration - done_sec) / speed_x if speed_x > 0 else None
+                else:
+                    percent, eta = 0, None
+                set_progress(progress_id, stage='converting', percent=round(percent, 1),
+                             known=bool(duration), done_sec=done_sec, duration=duration,
+                             speed_x=speed_x, eta=eta)
+        else:
+            log.append(line)
+
+    proc.wait()
+    if proc.returncode != 0:
+        tail = '\n'.join(log[-6:]) or 'неизвестная ошибка'
+        raise Exception(f'ffmpeg не смог конвертировать файл:\n{tail}')
+
+
+@app.route('/api/convert', methods=['POST'])
+def convert_file():
+    f = request.files.get('file')
+    target = (request.form.get('target') or '').lower().strip()
+    quality = (request.form.get('quality') or 'medium').lower()
+    progress_id = str(request.form.get('progress_id') or '')[:64]
+
+    if not f or not f.filename:
+        return jsonify({'error': 'Файл не передан'}), 400
+    if not shutil.which('ffmpeg'):
+        return jsonify({'error': 'ffmpeg не найден. Установи его: winget install Gyan.FFmpeg'}), 500
+
+    stem, ext = os.path.splitext(f.filename)
+    ext = ''.join(c for c in ext.lstrip('.').lower() if c.isalnum())
+    category = detect_category(ext)
+    if not category:
+        return jsonify({'error': f'Неподдерживаемый формат файла: .{ext or "?"}'}), 400
+    if target not in allowed_targets(category):
+        return jsonify({'error': f'Нельзя конвертировать {category} в {target}'}), 400
+
+    safe_stem = ''.join(c for c in stem if c.isalnum() or c.isspace()).strip() or 'converted'
+
+    tmp_dir = tempfile.mkdtemp(prefix='zany_conv_')
+    try:
+        src = os.path.join(tmp_dir, f'input.{ext}')
+        dst = os.path.join(tmp_dir, f'output.{target}')
+        f.save(src)
+
+        duration = get_duration(src) if category != 'image' else 0
+        cmd = [shutil.which('ffmpeg'), '-y', '-hide_banner', '-loglevel', 'error',
+               '-nostats', '-progress', 'pipe:1', '-i', src] + codec_args(target, quality) + [dst]
+        run_ffmpeg(cmd, duration, progress_id)
+
+        if not os.path.exists(dst):
+            raise Exception('Файл не был создан после конвертации')
+
+        file_size = os.path.getsize(dst)
+        download_filename = f'{safe_stem}.{target}'
+
+        def file_stream():
+            try:
+                with open(dst, 'rb') as out:
+                    while chunk := out.read(1024 * 64):
+                        yield chunk
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        clear_progress(progress_id)
         headers = {
             'Content-Disposition': f"attachment; filename*=UTF-8''{quote(download_filename)}",
             'Content-Length': str(file_size),

@@ -14,7 +14,12 @@
                 <p>Скачивай видео и аудио с YouTube в пару кликов</p>
             </header>
 
-            <main class="downloader-card">
+            <nav class="tabs">
+                <button type="button" class="tab-btn active" data-tab="downloaderTab">Downloader</button>
+                <button type="button" class="tab-btn" data-tab="converterTab">Converter</button>
+            </nav>
+
+            <main class="downloader-card" id="downloaderTab">
                 <div class="input-group">
                     <input type="text" id="urlInput" placeholder="Вставь ссылку на YouTube (например, https://youtu.be/...)" autocomplete="off">
                     <button id="fetchBtn" class="btn-primary">Найти</button>
@@ -82,6 +87,66 @@
                 </div>
             </main>
 
+            <main class="downloader-card hidden" id="converterTab">
+                <label for="convFileInput" id="convDropzone" class="dropzone">
+                    <span class="dropzone-title" id="convDropzoneTitle">Перетащи файл сюда или нажми для выбора</span>
+                    <span class="dropzone-sub">Изображения, видео и аудио</span>
+                </label>
+                <input type="file" id="convFileInput" class="hidden" accept="image/*,video/*,audio/*,.mkv,.flv,.wmv,.ts,.aac,.opus,.wma,.amr,.aiff,.aif,.ico,.tif,.tiff">
+
+                <div id="convOptions" class="options-container hidden">
+                    <div class="file-card">
+                        <span id="convFileType" class="file-type-badge">ВИДЕО</span>
+                        <div class="file-card-details">
+                            <h3 id="convFileName">file.mp4</h3>
+                            <p id="convFileSize">0 МБ</p>
+                        </div>
+                    </div>
+
+                    <div class="settings-row" style="margin-bottom: 15px;">
+                        <div class="setting-item">
+                            <label for="convFormat">Конвертировать в</label>
+                            <select id="convFormat"></select>
+                        </div>
+
+                        <div class="setting-item" id="convQualityContainer">
+                            <label for="convQuality">Качество</label>
+                            <select id="convQuality">
+                                <option value="high">Высокое</option>
+                                <option value="medium" selected>Среднее</option>
+                                <option value="low">Низкое (меньше размер)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button id="convertBtn" class="btn-success">Конвертировать</button>
+
+                    <div id="convProgressContainer" class="progress-container hidden">
+                        <div class="progress-info">
+                            <span id="convProgressText">Загрузка файла... 0%</span>
+                            <span id="convProgressBadge" class="progress-badge">Загрузка</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div id="convProgressFill" class="progress-bar-fill"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <div class="stat-card">
+                                <span id="convStatLabel" class="stat-label">Загружено</span>
+                                <span id="convStatDone" class="stat-value">—</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Скорость</span>
+                                <span id="convStatSpeed" class="stat-value stat-speed">—</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-label">Осталось</span>
+                                <span id="convStatEta" class="stat-value stat-eta">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
             <footer class="footer">
                 <p>Zany Downloader • Вайбкодинг проект</p>
             </footer>
@@ -89,5 +154,6 @@
     </div>
 
     <script src="js/main.js"></script>
+    <script src="js/converter.js"></script>
 </body>
 </html>
