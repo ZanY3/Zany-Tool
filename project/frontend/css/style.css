@@ -336,6 +336,7 @@ select:focus {
     color: white;
 }
 
+/* ---------- Конвертер ---------- */
 .dropzone {
     display: flex;
     flex-direction: column;
@@ -421,4 +422,34 @@ select:focus {
 @keyframes barPulse {
     0%, 100% { opacity: 0.35; }
     50% { opacity: 1; }
+}
+
+
+.lang-switch {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+    display: flex;
+    gap: 4px;
+}
+
+.lang-btn {
+    padding: 6px 12px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.lang-btn:hover {
+    color: var(--text-color);
+}
+
+.lang-btn.active {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    color: white;
 }

@@ -21,8 +21,6 @@
 
     const NO_QUALITY = ['wav', 'flac', 'png', 'bmp', 'tiff', 'gif'];
 
-    const CATEGORY_LABEL = { image: 'ФОТО', video: 'ВИДЕО', audio: 'АУДИО' };
-
     const dropzone = document.getElementById('convDropzone');
     const dropzoneTitle = document.getElementById('convDropzoneTitle');
     const fileInput = document.getElementById('convFileInput');
@@ -68,15 +66,15 @@
         parent.appendChild(opt);
     }
 
-    function fillFormats(category, inputExt) {
+    function fillFormats(category, inputExt, keepValue) {
         formatSelect.innerHTML = '';
 
         if (category === 'video') {
             const videoGroup = document.createElement('optgroup');
-            videoGroup.label = 'Видео';
+            videoGroup.label = t('conv.groupVideo');
             VIDEO_OUT.forEach((f) => addOption(videoGroup, f, f.toUpperCase()));
             const audioGroup = document.createElement('optgroup');
-            audioGroup.label = 'Только звук (извлечь аудио)';
+            audioGroup.label = t('conv.groupAudio');
             AUDIO_OUT.forEach((f) => addOption(audioGroup, f, f.toUpperCase()));
             formatSelect.appendChild(videoGroup);
             formatSelect.appendChild(audioGroup);
@@ -88,6 +86,7 @@
         const normalizedInput = inputExt === 'jpeg' ? 'jpg' : inputExt === 'tif' ? 'tiff' : inputExt;
         const firstDifferent = Array.from(formatSelect.options).find((o) => o.value !== normalizedInput);
         if (firstDifferent) formatSelect.value = firstDifferent.value;
+        if (keepValue) formatSelect.value = keepValue;
         updateQualityVisibility();
     }
 
@@ -95,10 +94,20 @@
         qualityContainer.classList.toggle('hidden', NO_QUALITY.includes(formatSelect.value));
     }
 
+    function renderFileInfo() {
+        if (!selectedFile) {
+            dropzoneTitle.textContent = t('conv.dropTitle');
+            return;
+        }
+        fileTypeBadge.textContent = t('cat.' + selectedCategory);
+        fileSizeEl.textContent = `${selectedExt.toUpperCase()} • ${formatBytes(selectedFile.size)}`;
+        dropzoneTitle.textContent = t('conv.dropChange');
+    }
+
     function setFile(file) {
         const category = detectCategory(file);
         if (!category) {
-            alert('Этот тип файла не поддерживается: ' + file.name);
+            alert(t('conv.unsupported', { name: file.name }));
             return;
         }
 
@@ -106,16 +115,20 @@
         selectedExt = getExt(file.name);
         selectedCategory = category;
 
-        fileTypeBadge.textContent = CATEGORY_LABEL[category];
         fileNameEl.textContent = file.name;
-        fileSizeEl.textContent = `${selectedExt.toUpperCase()} • ${formatBytes(file.size)}`;
-        dropzoneTitle.textContent = 'Выбрать другой файл';
+        renderFileInfo();
 
         fillFormats(category, selectedExt);
         optionsBox.classList.remove('hidden');
     }
 
     formatSelect.addEventListener('change', updateQualityVisibility);
+
+    renderFileInfo();
+    window.addEventListener('langchange', () => {
+        renderFileInfo();
+        if (selectedFile) fillFormats(selectedCategory, selectedExt, formatSelect.value);
+    });
 
     fileInput.addEventListener('change', () => {
         if (fileInput.files && fileInput.files[0]) setFile(fileInput.files[0]);
@@ -151,17 +164,17 @@
     }
 
     function applyConvertProgress(p) {
-        statLabel.textContent = 'Обработано';
+        statLabel.textContent = t('stat.processed');
         if (p.known) {
             const percent = Math.min(100, Math.round(p.percent || 0));
             setBar(percent, false);
-            progressText.textContent = `Конвертация... ${percent}%`;
+            progressText.textContent = t('conv.convertingPct', { p: percent });
             statDone.textContent = `${formatEta(p.done_sec)} / ${formatEta(p.duration)}`;
             statSpeed.textContent = p.speed_x ? `${p.speed_x.toFixed(1)}x` : '—';
             statEta.textContent = formatEta(p.eta);
         } else {
             setBar(100, true);
-            progressText.textContent = 'Конвертация...';
+            progressText.textContent = t('conv.converting');
             statDone.textContent = '—';
             statSpeed.textContent = '—';
             statEta.textContent = '—';
@@ -198,14 +211,16 @@
         fd.append('target', target);
         fd.append('quality', quality);
         fd.append('progress_id', progressId);
+        fd.append('lang', getLang());
 
         setControlsDisabled(true);
-        convertBtn.textContent = 'Конвертация...';
+        convertBtn.dataset.busy = '1';
+        convertBtn.textContent = t('conv.converting');
         progressBox.classList.remove('hidden');
         setBar(0, false);
-        progressText.textContent = 'Загрузка файла... 0%';
-        progressBadge.textContent = 'Загрузка';
-        resetStats('Загружено');
+        progressText.textContent = t('conv.uploading', { p: 0 });
+        progressBadge.textContent = t('badge.upload');
+        resetStats(t('stat.uploaded'));
 
         let phase = 'upload';
         let pollTimer = null;
@@ -236,14 +251,15 @@
             stopPolling();
             setTimeout(() => {
                 setControlsDisabled(false);
-                convertBtn.textContent = 'Конвертировать';
+                delete convertBtn.dataset.busy;
+                convertBtn.textContent = t('conv.convert');
                 progressBox.classList.add('hidden');
                 setBar(0, false);
             }, 1500);
         }
 
         function fail(message) {
-            alert('Ошибка при конвертации: ' + message);
+            alert(t('conv.errPrefix') + message);
             finish();
         }
 
@@ -257,18 +273,18 @@
             const elapsed = (Date.now() - phaseStart) / 1000;
             const speed = elapsed > 0 ? e.loaded / elapsed : 0;
             setBar(percent, false);
-            progressText.textContent = `Загрузка файла... ${percent}%`;
+            progressText.textContent = t('conv.uploading', { p: percent });
             statDone.textContent = `${formatBytes(e.loaded)} / ${formatBytes(e.total)}`;
-            statSpeed.textContent = speed > 0 ? `${formatBytes(speed)}/с` : '—';
+            statSpeed.textContent = speed > 0 ? `${formatBytes(speed)}${t('unit.perSec')}` : '—';
             statEta.textContent = speed > 0 ? formatEta((e.total - e.loaded) / speed) : '—';
         };
 
         xhr.upload.onload = () => {
             phase = 'convert';
-            progressBadge.textContent = 'Конвертация';
-            progressText.textContent = 'Конвертация... 0%';
+            progressBadge.textContent = t('badge.converting');
+            progressText.textContent = t('conv.convertingPct', { p: 0 });
             setBar(0, false);
-            resetStats('Обработано');
+            resetStats(t('stat.processed'));
             startPolling();
         };
 
@@ -277,10 +293,10 @@
                 stopPolling();
                 phase = 'receive';
                 phaseStart = Date.now();
-                progressBadge.textContent = 'Передача';
-                progressText.textContent = 'Передача файла на ваш ПК... 0%';
+                progressBadge.textContent = t('badge.transfer');
+                progressText.textContent = t('transfer.text', { p: 0 });
                 setBar(0, false);
-                resetStats('Получено');
+                resetStats(t('stat.received'));
             }
         };
 
@@ -291,27 +307,27 @@
             if (e.lengthComputable) {
                 const percent = Math.round((e.loaded / e.total) * 100);
                 setBar(percent, false);
-                progressText.textContent = `Передача файла на ваш ПК... ${percent}%`;
+                progressText.textContent = t('transfer.text', { p: percent });
                 statDone.textContent = `${formatBytes(e.loaded)} / ${formatBytes(e.total)}`;
                 statEta.textContent = speed > 0 ? formatEta((e.total - e.loaded) / speed) : '—';
             } else {
                 statDone.textContent = formatBytes(e.loaded);
             }
-            statSpeed.textContent = speed > 0 ? `${formatBytes(speed)}/с` : '—';
+            statSpeed.textContent = speed > 0 ? `${formatBytes(speed)}${t('unit.perSec')}` : '—';
         };
 
         xhr.onload = async () => {
             if (xhr.status === 200) {
                 setBar(100, false);
-                progressText.textContent = 'Готово! Конвертация завершена';
-                progressBadge.textContent = 'Готово';
+                progressText.textContent = t('conv.done');
+                progressBadge.textContent = t('badge.done');
                 statEta.textContent = '0:00';
 
                 const baseName = selectedFile.name.replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*]/g, '') || 'converted';
                 saveBlob(xhr.response, `${baseName}.${target}`);
                 finish();
             } else {
-                let message = 'Неизвестная ошибка';
+                let message = t('conv.errUnknown');
                 try {
                     const text = await xhr.response.text();
                     message = JSON.parse(text).error || message;
@@ -321,7 +337,7 @@
             }
         };
 
-        xhr.onerror = () => fail('Не удалось связаться с сервером');
+        xhr.onerror = () => fail(t('conv.errNetwork'));
 
         phaseStart = Date.now();
         xhr.send(fd);

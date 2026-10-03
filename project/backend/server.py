@@ -23,6 +23,38 @@ CORS(app)
 
 YOUTUBE_ARGS = {'youtube': {'player_client': ['default', 'web_safari']}}
 
+MESSAGES = {
+    'url_missing': {'ru': 'URL не указан', 'en': 'URL is missing'},
+    'untitled': {'ru': 'Без названия', 'en': 'Untitled'},
+    'no_file_download': {'ru': 'Файл не был создан после скачивания',
+                         'en': 'The file was not created after downloading'},
+    'no_file_sent': {'ru': 'Файл не передан', 'en': 'No file was sent'},
+    'ffmpeg_missing': {'ru': 'ffmpeg не найден. Установи его: winget install Gyan.FFmpeg',
+                       'en': 'ffmpeg was not found. Install it: winget install Gyan.FFmpeg'},
+    'unsupported_format': {'ru': 'Неподдерживаемый формат файла: .{ext}',
+                           'en': 'Unsupported file format: .{ext}'},
+    'cannot_convert': {'ru': 'Нельзя конвертировать {category} в {target}',
+                       'en': 'Cannot convert {category} to {target}'},
+    'no_file_convert': {'ru': 'Файл не был создан после конвертации',
+                        'en': 'The file was not created after conversion'},
+    'ffmpeg_failed': {'ru': 'ffmpeg не смог конвертировать файл:\n{tail}',
+                      'en': 'ffmpeg could not convert the file:\n{tail}'},
+    'unknown_error': {'ru': 'неизвестная ошибка', 'en': 'unknown error'},
+}
+CATEGORY_NAMES = {
+    'image': {'ru': 'фото', 'en': 'image'},
+    'video': {'ru': 'видео', 'en': 'video'},
+    'audio': {'ru': 'аудио', 'en': 'audio'},
+}
+
+
+def get_lang(value):
+    return value if value in ('ru', 'en') else 'ru'
+
+
+def msg(key, lang, **kw):
+    return MESSAGES[key][get_lang(lang)].format(**kw)
+
 PROGRESS = {}
 PROGRESS_LOCK = threading.Lock()
 
@@ -86,8 +118,9 @@ def index():
 def fetch_video_info():
     data = request.json or {}
     url = data.get('url')
+    lang = get_lang(data.get('lang'))
     if not url:
-        return jsonify({'error': 'URL не указан'}), 400
+        return jsonify({'error': msg('url_missing', lang)}), 400
     try:
         ydl_opts = {
             'noplaylist': True,
@@ -99,7 +132,7 @@ def fetch_video_info():
             info = ydl.extract_info(url, download=False)
             return jsonify({
                 'url': url,
-                'title': info.get('title', 'Без названия'),
+                'title': info.get('title') or msg('untitled', lang),
                 'thumbnail': info.get('thumbnail', ''),
                 'duration': format_duration(info.get('duration', 0))
             })
@@ -115,9 +148,10 @@ def download_video():
     quality = str(data.get('quality', '720'))
     title = data.get('title', 'video')
     progress_id = str(data.get('progress_id') or '')[:64]
+    lang = get_lang(data.get('lang'))
 
     if not url:
-        return jsonify({'error': 'URL не указан'}), 400
+        return jsonify({'error': msg('url_missing', lang)}), 400
 
     if not quality.isdigit():
         quality = '720'
@@ -166,7 +200,7 @@ def download_video():
 
         files = os.listdir(tmp_dir)
         if not files:
-            raise Exception("Файл не был создан после скачивания")
+            raise Exception(msg('no_file_download', lang))
 
         preferred = [f for f in files if f.endswith(('.mp4', '.mp3'))]
         filename = os.path.join(tmp_dir, (preferred or files)[0])
@@ -297,7 +331,7 @@ def codec_args(target, quality):
     return []
 
 
-def run_ffmpeg(cmd, duration, progress_id):
+def run_ffmpeg(cmd, duration, progress_id, lang='ru'):
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, encoding='utf-8', errors='replace',
@@ -338,8 +372,8 @@ def run_ffmpeg(cmd, duration, progress_id):
 
     proc.wait()
     if proc.returncode != 0:
-        tail = '\n'.join(log[-6:]) or 'неизвестная ошибка'
-        raise Exception(f'ffmpeg не смог конвертировать файл:\n{tail}')
+        tail = '\n'.join(log[-6:]) or msg('unknown_error', lang)
+        raise Exception(msg('ffmpeg_failed', lang, tail=tail))
 
 
 @app.route('/api/convert', methods=['POST'])
@@ -348,19 +382,21 @@ def convert_file():
     target = (request.form.get('target') or '').lower().strip()
     quality = (request.form.get('quality') or 'medium').lower()
     progress_id = str(request.form.get('progress_id') or '')[:64]
+    lang = get_lang(request.form.get('lang'))
 
     if not f or not f.filename:
-        return jsonify({'error': 'Файл не передан'}), 400
+        return jsonify({'error': msg('no_file_sent', lang)}), 400
     if not shutil.which('ffmpeg'):
-        return jsonify({'error': 'ffmpeg не найден. Установи его: winget install Gyan.FFmpeg'}), 500
+        return jsonify({'error': msg('ffmpeg_missing', lang)}), 500
 
     stem, ext = os.path.splitext(f.filename)
     ext = ''.join(c for c in ext.lstrip('.').lower() if c.isalnum())
     category = detect_category(ext)
     if not category:
-        return jsonify({'error': f'Неподдерживаемый формат файла: .{ext or "?"}'}), 400
+        return jsonify({'error': msg('unsupported_format', lang, ext=ext or '?')}), 400
     if target not in allowed_targets(category):
-        return jsonify({'error': f'Нельзя конвертировать {category} в {target}'}), 400
+        return jsonify({'error': msg('cannot_convert', lang,
+                                     category=CATEGORY_NAMES[category][lang], target=target)}), 400
 
     safe_stem = ''.join(c for c in stem if c.isalnum() or c.isspace()).strip() or 'converted'
 
@@ -373,10 +409,10 @@ def convert_file():
         duration = get_duration(src) if category != 'image' else 0
         cmd = [shutil.which('ffmpeg'), '-y', '-hide_banner', '-loglevel', 'error',
                '-nostats', '-progress', 'pipe:1', '-i', src] + codec_args(target, quality) + [dst]
-        run_ffmpeg(cmd, duration, progress_id)
+        run_ffmpeg(cmd, duration, progress_id, lang)
 
         if not os.path.exists(dst):
-            raise Exception('Файл не был создан после конвертации')
+            raise Exception(msg('no_file_convert', lang))
 
         file_size = os.path.getsize(dst)
         download_filename = f'{safe_stem}.{target}'

@@ -21,10 +21,10 @@ const statSpeed = document.getElementById('statSpeed');
 const statEta = document.getElementById('statEta');
 
 function formatBytes(bytes) {
-    if (!bytes || bytes < 0) return '0 МБ';
+    if (!bytes || bytes < 0) return '0 ' + t('unit.mb');
     const mb = bytes / (1024 * 1024);
-    if (mb >= 1024) return (mb / 1024).toFixed(2) + ' ГБ';
-    return mb.toFixed(1) + ' МБ';
+    if (mb >= 1024) return (mb / 1024).toFixed(2) + ' ' + t('unit.gb');
+    return mb.toFixed(1) + ' ' + t('unit.mb');
 }
 
 function formatEta(seconds) {
@@ -48,11 +48,16 @@ function makeProgressId() {
     return 'p' + Date.now() + Math.random().toString(16).slice(2);
 }
 
+function renderVideoInfo() {
+    videoTitle.textContent = currentVideoData ? currentVideoData.title : t('dl.videoTitlePlaceholder');
+    videoDuration.textContent = t('dl.duration', { d: currentVideoData ? currentVideoData.duration : '--:--' });
+}
+
 function applyServerProgress(p) {
     if (p.stage === 'processing') {
         progressBarFill.style.width = '100%';
-        progressText.textContent = 'Обработка файла...';
-        progressSpeed.textContent = 'Обработка';
+        progressText.textContent = t('dl.processing');
+        progressSpeed.textContent = t('badge.processing');
         statSpeed.textContent = '—';
         statEta.textContent = '—';
         return;
@@ -61,17 +66,20 @@ function applyServerProgress(p) {
     const percent = Math.min(100, Math.round(p.percent || 0));
     const isAudio = p.kind === 'audio';
     progressBarFill.style.width = `${percent}%`;
-    progressText.textContent = `Скачивание ${isAudio ? 'аудио' : 'видео'}... ${percent}%`;
-    progressSpeed.textContent = isAudio ? 'Аудио' : 'Видео';
+    progressText.textContent = t(isAudio ? 'dl.progressAudio' : 'dl.progressVideo', { p: percent });
+    progressSpeed.textContent = t(isAudio ? 'badge.audio' : 'badge.video');
 
     const done = p.total ? Math.min(p.downloaded || 0, p.total) : (p.downloaded || 0);
     statDownloaded.textContent = p.total
         ? `${formatBytes(done)} / ${formatBytes(p.total)}`
         : formatBytes(done);
-    statSpeed.textContent = p.speed ? `${formatBytes(p.speed)}/с` : '—';
+    statSpeed.textContent = p.speed ? `${formatBytes(p.speed)}${t('unit.perSec')}` : '—';
     statEta.textContent = formatEta(p.eta);
 }
 
+
+renderVideoInfo();
+window.addEventListener('langchange', renderVideoInfo);
 
 formatSelect.addEventListener('change', () => {
     if (formatSelect.value === 'audio') {
@@ -84,37 +92,38 @@ formatSelect.addEventListener('change', () => {
 fetchBtn.addEventListener('click', async () => {
     const url = urlInput.value.trim();
     if (!url) {
-        alert('Введите ссылку на видео!');
+        alert(t('dl.alertEnterUrl'));
         return;
     }
 
-    fetchBtn.textContent = 'Ищем...';
+    fetchBtn.dataset.busy = '1';
+    fetchBtn.textContent = t('dl.searching');
     fetchBtn.disabled = true;
 
     try {
         const response = await fetch('/api/fetch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
+            body: JSON.stringify({ url, lang: getLang() })
         });
 
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.error || 'Ошибка при получении данных');
+            throw new Error(data.error || t('dl.errFetch'));
         }
 
         currentVideoData = data;
         videoThumbnail.src = data.thumbnail;
-        videoTitle.textContent = data.title;
-        videoDuration.textContent = `Длительность: ${data.duration}`;
+        renderVideoInfo();
         titleInput.value = data.title;
 
         optionsContainer.classList.remove('hidden');
     } catch (err) {
-        alert('Ошибка: ' + err.message);
+        alert(t('dl.errFetchPrefix') + err.message);
     } finally {
-        fetchBtn.textContent = 'Найти';
+        delete fetchBtn.dataset.busy;
+        fetchBtn.textContent = t('dl.find');
         fetchBtn.disabled = false;
     }
 });
@@ -127,7 +136,8 @@ downloadBtn.addEventListener('click', async () => {
     const customTitle = titleInput.value.trim() || currentVideoData.title;
 
     downloadBtn.disabled = true;
-    downloadBtn.textContent = 'Скачивание...';
+    downloadBtn.dataset.busy = '1';
+    downloadBtn.textContent = t('dl.downloading');
     urlInput.disabled = true;
     fetchBtn.disabled = true;
     titleInput.disabled = true;
@@ -139,8 +149,8 @@ downloadBtn.addEventListener('click', async () => {
 
     progressContainer.classList.remove('hidden');
     progressBarFill.style.width = '0%';
-    progressText.textContent = 'Подключение к YouTube... 0%';
-    progressSpeed.textContent = 'Подготовка';
+    progressText.textContent = t('dl.connecting');
+    progressSpeed.textContent = t('badge.preparing');
     resetStats();
 
     const progressInterval = setInterval(async () => {
@@ -163,7 +173,8 @@ downloadBtn.addEventListener('click', async () => {
                 format: format,
                 quality: quality,
                 title: customTitle,
-                progress_id: progressId
+                progress_id: progressId,
+                lang: getLang()
             })
         });
 
@@ -172,12 +183,12 @@ downloadBtn.addEventListener('click', async () => {
 
         if (!response.ok) {
             const errData = await response.json();
-            throw new Error(errData.error || 'Ошибка скачивания');
+            throw new Error(errData.error || t('dl.errDownload'));
         }
 
         progressBarFill.style.width = '0%';
-        progressText.textContent = 'Передача файла на ваш ПК... 0%';
-        progressSpeed.textContent = 'Передача';
+        progressText.textContent = t('transfer.text', { p: 0 });
+        progressSpeed.textContent = t('badge.transfer');
         resetStats();
 
         const contentLength = response.headers.get('Content-Length');
@@ -201,18 +212,18 @@ downloadBtn.addEventListener('click', async () => {
             if (totalBytes > 0) {
                 const totalPercent = Math.round((receivedBytes / totalBytes) * 100);
                 progressBarFill.style.width = `${totalPercent}%`;
-                progressText.textContent = `Передача файла на ваш ПК... ${totalPercent}%`;
+                progressText.textContent = t('transfer.text', { p: totalPercent });
                 statDownloaded.textContent = `${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}`;
                 statEta.textContent = speed > 0 ? formatEta((totalBytes - receivedBytes) / speed) : '—';
             } else {
                 statDownloaded.textContent = formatBytes(receivedBytes);
             }
-            statSpeed.textContent = speed > 0 ? `${formatBytes(speed)}/с` : '—';
+            statSpeed.textContent = speed > 0 ? `${formatBytes(speed)}${t('unit.perSec')}` : '—';
         }
 
         progressBarFill.style.width = '100%';
-        progressText.textContent = 'Готово! Загрузка завершена';
-        progressSpeed.textContent = 'Готово';
+        progressText.textContent = t('dl.done');
+        progressSpeed.textContent = t('badge.done');
         statEta.textContent = '0:00';
 
         const blob = new Blob(chunks);
@@ -231,11 +242,12 @@ downloadBtn.addEventListener('click', async () => {
     } catch (err) {
         pollingActive = false;
         clearInterval(progressInterval);
-        alert('Ошибка при скачивании: ' + err.message);
+        alert(t('dl.errDownloadPrefix') + err.message);
     } finally {
         setTimeout(() => {
             downloadBtn.disabled = false;
-            downloadBtn.textContent = 'Скачать файл';
+            delete downloadBtn.dataset.busy;
+            downloadBtn.textContent = t('dl.download');
             urlInput.disabled = false;
             fetchBtn.disabled = false;
             titleInput.disabled = false;

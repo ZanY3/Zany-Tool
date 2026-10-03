@@ -9,9 +9,14 @@
 <body>
     <div class="wrapper">
         <div class="container">
+            <div class="lang-switch" role="group" aria-label="Language">
+                <button type="button" class="lang-btn active" data-lang="ru">RU</button>
+                <button type="button" class="lang-btn" data-lang="en">EN</button>
+            </div>
+
             <header class="header">
                 <h1>Zany<span class="accent">Tool</span></h1>
-                <p>Мультитул задач, которые Zany собрал для себя на одном сайте</p>
+                <p data-i18n="header.sub">Мультитул задач, которые Zany собрал для себя на одном сайте</p>
             </header>
 
             <nav class="tabs">
@@ -21,8 +26,8 @@
 
             <main class="downloader-card" id="downloaderTab">
                 <div class="input-group">
-                    <input type="text" id="urlInput" placeholder="Вставь ссылку на YouTube (например, https://youtu.be/...)" autocomplete="off">
-                    <button id="fetchBtn" class="btn-primary">Найти</button>
+                    <input type="text" id="urlInput" placeholder="Вставь ссылку на YouTube (например, https://youtu.be/...)" data-i18n-placeholder="dl.urlPlaceholder" autocomplete="off">
+                    <button id="fetchBtn" class="btn-primary" data-i18n="dl.find">Найти</button>
                 </div>
 
                 <div id="optionsContainer" class="options-container hidden">
@@ -35,21 +40,21 @@
                     </div>
 
                     <div class="setting-item" style="margin-bottom: 15px;">
-                        <label for="titleInput">Название файла</label>
-                        <input type="text" id="titleInput" placeholder="Введите название файла" autocomplete="off">
+                        <label for="titleInput" data-i18n="dl.fileName">Название файла</label>
+                        <input type="text" id="titleInput" placeholder="Введите название файла" data-i18n-placeholder="dl.fileNamePlaceholder" autocomplete="off">
                     </div>
 
                     <div class="settings-row" style="margin-bottom: 15px;">
                         <div class="setting-item">
-                            <label for="formatSelect">Формат</label>
+                            <label for="formatSelect" data-i18n="dl.format">Формат</label>
                             <select id="formatSelect">
-                                <option value="video">Видео (MP4)</option>
-                                <option value="audio">Аудио (MP3)</option>
+                                <option value="video" data-i18n="dl.formatVideo">Видео (MP4)</option>
+                                <option value="audio" data-i18n="dl.formatAudio">Аудио (MP3)</option>
                             </select>
                         </div>
 
                         <div class="setting-item" id="qualityContainer">
-                            <label for="qualitySelect">Качество</label>
+                            <label for="qualitySelect" data-i18n="dl.quality">Качество</label>
                             <select id="qualitySelect">
                                 <option value="1080">1080p (Full HD)</option>
                                 <option value="720" selected>720p (HD)</option>
@@ -59,7 +64,7 @@
                         </div>
                     </div>
 
-                    <button id="downloadBtn" class="btn-success">Скачать файл</button>
+                    <button id="downloadBtn" class="btn-success" data-i18n="dl.download">Скачать файл</button>
 
                     <div id="progressContainer" class="progress-container hidden">
                         <div class="progress-info">
@@ -71,15 +76,15 @@
                         </div>
                         <div class="progress-stats">
                             <div class="stat-card">
-                                <span class="stat-label">Скачано</span>
+                                <span class="stat-label" data-i18n="stat.downloaded">Скачано</span>
                                 <span id="statDownloaded" class="stat-value">—</span>
                             </div>
                             <div class="stat-card">
-                                <span class="stat-label">Скорость</span>
+                                <span class="stat-label" data-i18n="stat.speed">Скорость</span>
                                 <span id="statSpeed" class="stat-value stat-speed">—</span>
                             </div>
                             <div class="stat-card">
-                                <span class="stat-label">Осталось</span>
+                                <span class="stat-label" data-i18n="stat.eta">Осталось</span>
                                 <span id="statEta" class="stat-value stat-eta">—</span>
                             </div>
                         </div>
@@ -90,7 +95,7 @@
             <main class="downloader-card hidden" id="converterTab">
                 <label for="convFileInput" id="convDropzone" class="dropzone">
                     <span class="dropzone-title" id="convDropzoneTitle">Перетащи файл сюда или нажми для выбора</span>
-                    <span class="dropzone-sub">Изображения, видео и аудио</span>
+                    <span class="dropzone-sub" data-i18n="conv.dropSub">Изображения, видео и аудио</span>
                 </label>
                 <input type="file" id="convFileInput" class="hidden" accept="image/*,video/*,audio/*,.mkv,.flv,.wmv,.ts,.aac,.opus,.wma,.amr,.aiff,.aif,.ico,.tif,.tiff">
 
@@ -105,21 +110,21 @@
 
                     <div class="settings-row" style="margin-bottom: 15px;">
                         <div class="setting-item">
-                            <label for="convFormat">Конвертировать в</label>
+                            <label for="convFormat" data-i18n="conv.convertTo">Конвертировать в</label>
                             <select id="convFormat"></select>
                         </div>
 
                         <div class="setting-item" id="convQualityContainer">
-                            <label for="convQuality">Качество</label>
+                            <label for="convQuality" data-i18n="conv.quality">Качество</label>
                             <select id="convQuality">
-                                <option value="high">Высокое</option>
-                                <option value="medium" selected>Среднее</option>
-                                <option value="low">Низкое (меньше размер)</option>
+                                <option value="high" data-i18n="conv.qHigh">Высокое</option>
+                                <option value="medium" selected data-i18n="conv.qMedium">Среднее</option>
+                                <option value="low" data-i18n="conv.qLow">Низкое (меньше размер)</option>
                             </select>
                         </div>
                     </div>
 
-                    <button id="convertBtn" class="btn-success">Конвертировать</button>
+                    <button id="convertBtn" class="btn-success" data-i18n="conv.convert">Конвертировать</button>
 
                     <div id="convProgressContainer" class="progress-container hidden">
                         <div class="progress-info">
@@ -135,11 +140,11 @@
                                 <span id="convStatDone" class="stat-value">—</span>
                             </div>
                             <div class="stat-card">
-                                <span class="stat-label">Скорость</span>
+                                <span class="stat-label" data-i18n="stat.speed">Скорость</span>
                                 <span id="convStatSpeed" class="stat-value stat-speed">—</span>
                             </div>
                             <div class="stat-card">
-                                <span class="stat-label">Осталось</span>
+                                <span class="stat-label" data-i18n="stat.eta">Осталось</span>
                                 <span id="convStatEta" class="stat-value stat-eta">—</span>
                             </div>
                         </div>
@@ -148,11 +153,12 @@
             </main>
 
             <footer class="footer">
-                <p>Zany Tool • Вайбкодинг проект</p>
+                <p data-i18n="footer">ZanyTool • Вайбкодинг проект</p>
             </footer>
         </div>
     </div>
 
+    <script src="js/i18n.js"></script>
     <script src="js/main.js"></script>
     <script src="js/converter.js"></script>
 </body>
