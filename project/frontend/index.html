@@ -64,6 +64,18 @@
                         </div>
                     </div>
 
+                    <div class="setting-item hidden" id="liveContainer" style="margin-bottom: 15px;">
+                        <label for="liveSelect" data-i18n="dl.liveLength">Сколько записывать</label>
+                        <select id="liveSelect">
+                            <option value="60" data-i18n="dl.live1">1 минута</option>
+                            <option value="300" selected data-i18n="dl.live5">5 минут</option>
+                            <option value="600" data-i18n="dl.live10">10 минут</option>
+                            <option value="1800" data-i18n="dl.live30">30 минут</option>
+                            <option value="3600" data-i18n="dl.live60">1 час</option>
+                        </select>
+                        <p class="hint" data-i18n="dl.liveHint">Запись начнётся с текущего момента эфира и остановится по таймеру. Рекламные вставки могут попасть в запись.</p>
+                    </div>
+
                     <button id="downloadBtn" class="btn-success" data-i18n="dl.download">Скачать файл</button>
 
                     <div id="progressContainer" class="progress-container hidden">

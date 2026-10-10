@@ -309,6 +309,7 @@ select:focus {
 }
 
 
+/* ---------- Вкладки ---------- */
 .tabs {
     display: flex;
     gap: 6px;
@@ -414,6 +415,7 @@ select:focus {
     font-size: 0.9rem;
 }
 
+/* Когда длительность неизвестна (например, картинка), полоса просто мерцает */
 .progress-bar-fill.indeterminate {
     width: 100% !important;
     animation: barPulse 1.1s ease-in-out infinite;
@@ -425,6 +427,7 @@ select:focus {
 }
 
 
+/* ---------- Переключатель языка ---------- */
 .lang-switch {
     position: absolute;
     top: 16px;
@@ -452,4 +455,13 @@ select:focus {
     background-color: var(--accent-color);
     border-color: var(--accent-color);
     color: white;
+}
+
+
+/* ---------- Запись эфира ---------- */
+.hint {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.4;
+    margin-top: 8px;
 }

@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import webbrowser
 from urllib.parse import quote
 
@@ -21,8 +22,12 @@ app = Flask(
 )
 CORS(app)
 
+# Свежие версии yt-dlp (2026.08.19+) по умолчанию убрали клиент web_safari,
+# а именно он отдаёт HD (HLS, до 1080p) там, где остальные клиенты дают только 360p.
+# 'default' оставляет стандартный набор клиентов, 'web_safari' добавляем сверху.
 YOUTUBE_ARGS = {'youtube': {'player_client': ['default', 'web_safari']}}
 
+# Сообщения сервера на двух языках (язык приходит от сайта в поле lang)
 MESSAGES = {
     'url_missing': {'ru': 'URL не указан', 'en': 'URL is missing'},
     'untitled': {'ru': 'Без названия', 'en': 'Untitled'},
@@ -55,11 +60,13 @@ def get_lang(value):
 def msg(key, lang, **kw):
     return MESSAGES[key][get_lang(lang)].format(**kw)
 
+
+# Прогресс скачивания: {progress_id: {...}}. Сайт опрашивает его через /api/progress/<id>
 PROGRESS = {}
 PROGRESS_LOCK = threading.Lock()
 
 
-def make_progress_hooks(progress_id):
+def make_progress_hooks(progress_id, live=False):
     def update(**kw):
         with PROGRESS_LOCK:
             PROGRESS.setdefault(progress_id, {}).update(kw)
@@ -76,6 +83,10 @@ def make_progress_hooks(progress_id):
         if d.get('status') == 'downloading':
             total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
             done = d.get('downloaded_bytes') or 0
+            if live:
+                # У эфира нет конца, поэтому процент и время считает таймер (см. start_live_ticker)
+                update(downloaded=done)
+                return
             if total:
                 percent = min(done / total * 100, 100)
             elif d.get('fragment_count'):
@@ -86,6 +97,8 @@ def make_progress_hooks(progress_id):
                    downloaded=done, total=total,
                    speed=d.get('speed') or 0, eta=d.get('eta'))
         elif d.get('status') == 'finished':
+            if live:
+                return
             total = d.get('total_bytes') or d.get('downloaded_bytes') or 0
             update(stage='downloading', kind=kind, percent=100,
                    downloaded=total, total=total, speed=0, eta=0)
@@ -95,6 +108,32 @@ def make_progress_hooks(progress_id):
             update(stage='processing')
 
     return on_progress, on_postprocess
+
+
+def start_live_ticker(progress_id, seconds):
+    """Раз в полсекунды обновляет прогресс записи эфира: сколько прошло из выбранного времени."""
+    stop = threading.Event()
+    started = time.time()
+
+    def run():
+        while not stop.is_set():
+            elapsed = time.time() - started
+            with PROGRESS_LOCK:
+                cur = PROGRESS.setdefault(progress_id, {})
+                if cur.get('stage') == 'processing':
+                    return
+                done = cur.get('downloaded', 0)
+            if stop.is_set():
+                return
+            set_progress(progress_id, stage='downloading', kind='video', live=True,
+                         percent=round(min(elapsed / seconds * 100, 99.0), 1),
+                         downloaded=done, total=0,
+                         speed=(done / elapsed) if elapsed > 1 else 0,
+                         eta=max(seconds - elapsed, 0))
+            stop.wait(0.5)
+
+    threading.Thread(target=run, daemon=True).start()
+    return stop
 
 
 def clear_progress(progress_id):
@@ -122,6 +161,7 @@ def fetch_video_info():
     if not url:
         return jsonify({'error': msg('url_missing', lang)}), 400
     try:
+        # Без extractor_args: свежий yt-dlp сам выбирает рабочие клиенты YouTube
         ydl_opts = {
             'noplaylist': True,
             'skip_download': True,
@@ -134,7 +174,8 @@ def fetch_video_info():
                 'url': url,
                 'title': info.get('title') or msg('untitled', lang),
                 'thumbnail': info.get('thumbnail', ''),
-                'duration': format_duration(info.get('duration', 0))
+                'duration': format_duration(info.get('duration', 0)),
+                'is_live': bool(info.get('is_live')),
             })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -156,8 +197,17 @@ def download_video():
     if not quality.isdigit():
         quality = '720'
 
+    # Для прямых эфиров сайт присылает, сколько секунд записывать (иначе запись шла бы вечно)
+    try:
+        live_seconds = int(data.get('live_seconds') or 0)
+    except (TypeError, ValueError):
+        live_seconds = 0
+    if live_seconds not in (60, 300, 600, 1800, 3600):
+        live_seconds = 0
+
     safe_title = "".join(c for c in title if c.isalnum() or c.isspace()).strip() or "media"
 
+    # Каждая загрузка идёт в свою временную папку, чтобы файлы не путались
     tmp_dir = tempfile.mkdtemp(prefix='zany_')
     outtmpl = os.path.join(tmp_dir, 'media.%(ext)s')
 
@@ -175,6 +225,12 @@ def download_video():
             'extractor_args': YOUTUBE_ARGS,
         }
     else:
+        # Порядок попыток:
+        # 1) mp4-видео + m4a-аудио нужного качества (лучше всего совместимо)
+        # 2) любое видео + любое аудио не выше выбранного качества
+        # 3) готовый муксованный файл не выше выбранного качества
+        # Финального "/best" нет специально: если выбранного качества нет,
+        # получишь честную ошибку, а не тихий 360p.
         ydl_opts = {
             'format': (
                 f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/'
@@ -188,20 +244,34 @@ def download_video():
             'extractor_args': YOUTUBE_ARGS,
         }
 
+    live_stop = None
+    if live_seconds:
+        # Запись эфира: качаем через ffmpeg и обрываем по таймеру (-t).
+        # Для эфира добавляем запасной "/best": у части эфиров высота качества не указана.
+        if format_type != 'audio':
+            ydl_opts['format'] += '/best'
+        ydl_opts['external_downloader'] = {'default': 'ffmpeg'}
+        ydl_opts['external_downloader_args'] = {'ffmpeg': ['-t', str(live_seconds)]}
+
     if progress_id:
-        on_progress, on_postprocess = make_progress_hooks(progress_id)
+        on_progress, on_postprocess = make_progress_hooks(progress_id, live=bool(live_seconds))
         ydl_opts['progress_hooks'] = [on_progress]
         ydl_opts['postprocessor_hooks'] = [on_postprocess]
+        if live_seconds:
+            live_stop = start_live_ticker(progress_id, live_seconds)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(url, download=True)
+        if live_stop:
+            live_stop.set()
         clear_progress(progress_id)
 
         files = os.listdir(tmp_dir)
         if not files:
             raise Exception(msg('no_file_download', lang))
 
+        # Берём итоговый файл (для аудио это mp3, для видео mp4)
         preferred = [f for f in files if f.endswith(('.mp4', '.mp3'))]
         filename = os.path.join(tmp_dir, (preferred or files)[0])
 
@@ -224,10 +294,14 @@ def download_video():
         return Response(file_stream(), headers=headers, mimetype='application/octet-stream')
 
     except Exception as e:
+        if live_stop:
+            live_stop.set()
         clear_progress(progress_id)
         shutil.rmtree(tmp_dir, ignore_errors=True)
         return jsonify({'error': str(e)}), 500
 
+
+# ======================= КОНВЕРТЕР (ffmpeg) =======================
 
 IMAGE_IN = {'jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff', 'ico'}
 VIDEO_IN = {'mp4', 'mkv', 'webm', 'avi', 'mov', 'wmv', 'flv', 'm4v', 'mpg', 'mpeg', '3gp', 'ts'}
@@ -284,6 +358,7 @@ def codec_args(target, quality):
     q = quality if quality in ('high', 'medium', 'low') else 'medium'
     abr = {'high': '320k', 'medium': '192k', 'low': '128k'}[q]
 
+    # ----- аудио -----
     if target in AUDIO_OUT:
         args = ['-map', '0:a:0', '-vn']
         if target == 'mp3':
@@ -300,6 +375,7 @@ def codec_args(target, quality):
             args += ['-c:a', 'libopus', '-b:a', {'high': '192k', 'medium': '128k', 'low': '96k'}[q]]
         return args
 
+    # ----- изображения -----
     if target in IMAGE_OUT:
         if target == 'jpg':
             return ['-frames:v', '1', '-q:v', {'high': '2', 'medium': '5', 'low': '10'}[q]]
@@ -307,8 +383,9 @@ def codec_args(target, quality):
             return ['-quality', {'high': '95', 'medium': '80', 'low': '60'}[q]]
         if target == 'gif':
             return []
-        return ['-frames:v', '1']
+        return ['-frames:v', '1']  # png, bmp, tiff
 
+    # ----- видео -----
     base = ['-map', '0:v:0', '-map', '0:a:0?']
     crf = {'high': '18', 'medium': '23', 'low': '28'}[q]
     if target in ('mp4', 'mov', 'mkv'):

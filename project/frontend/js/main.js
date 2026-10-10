@@ -10,6 +10,8 @@ const titleInput = document.getElementById('titleInput');
 const formatSelect = document.getElementById('formatSelect');
 const qualityContainer = document.getElementById('qualityContainer');
 const qualitySelect = document.getElementById('qualitySelect');
+const liveContainer = document.getElementById('liveContainer');
+const liveSelect = document.getElementById('liveSelect');
 const downloadBtn = document.getElementById('downloadBtn');
 
 const progressContainer = document.getElementById('progressContainer');
@@ -50,7 +52,11 @@ function makeProgressId() {
 
 function renderVideoInfo() {
     videoTitle.textContent = currentVideoData ? currentVideoData.title : t('dl.videoTitlePlaceholder');
-    videoDuration.textContent = t('dl.duration', { d: currentVideoData ? currentVideoData.duration : '--:--' });
+    if (currentVideoData && currentVideoData.is_live) {
+        videoDuration.textContent = t('dl.live');
+    } else {
+        videoDuration.textContent = t('dl.duration', { d: currentVideoData ? currentVideoData.duration : '--:--' });
+    }
 }
 
 function applyServerProgress(p) {
@@ -65,6 +71,18 @@ function applyServerProgress(p) {
 
     const percent = Math.min(100, Math.round(p.percent || 0));
     const isAudio = p.kind === 'audio';
+
+    if (p.live) {
+        // Запись эфира: полоса показывает, сколько прошло из выбранного времени
+        progressBarFill.style.width = `${percent}%`;
+        progressText.textContent = t('dl.recording', { p: percent });
+        progressSpeed.textContent = t('badge.recording');
+        statDownloaded.textContent = formatBytes(p.downloaded || 0);
+        statSpeed.textContent = p.speed ? `${formatBytes(p.speed)}${t('unit.perSec')}` : '—';
+        statEta.textContent = formatEta(p.eta);
+        return;
+    }
+
     progressBarFill.style.width = `${percent}%`;
     progressText.textContent = t(isAudio ? 'dl.progressAudio' : 'dl.progressVideo', { p: percent });
     progressSpeed.textContent = t(isAudio ? 'badge.audio' : 'badge.video');
@@ -118,6 +136,7 @@ fetchBtn.addEventListener('click', async () => {
         renderVideoInfo();
         titleInput.value = data.title;
 
+        liveContainer.classList.toggle('hidden', !data.is_live);
         optionsContainer.classList.remove('hidden');
     } catch (err) {
         alert(t('dl.errFetchPrefix') + err.message);
@@ -143,6 +162,7 @@ downloadBtn.addEventListener('click', async () => {
     titleInput.disabled = true;
     formatSelect.disabled = true;
     qualitySelect.disabled = true;
+    liveSelect.disabled = true;
 
     const progressId = makeProgressId();
     let pollingActive = true;
@@ -153,6 +173,7 @@ downloadBtn.addEventListener('click', async () => {
     progressSpeed.textContent = t('badge.preparing');
     resetStats();
 
+    // Реальный прогресс с сервера (yt-dlp), опрашиваем дважды в секунду
     const progressInterval = setInterval(async () => {
         try {
             const r = await fetch(`/api/progress/${progressId}`, { cache: 'no-store' });
@@ -161,6 +182,7 @@ downloadBtn.addEventListener('click', async () => {
             if (!pollingActive || !p.stage) return;
             applyServerProgress(p);
         } catch (e) {
+            // пропускаем единичные сбои опроса
         }
     }, 500);
 
@@ -174,6 +196,7 @@ downloadBtn.addEventListener('click', async () => {
                 quality: quality,
                 title: customTitle,
                 progress_id: progressId,
+                live_seconds: currentVideoData.is_live ? parseInt(liveSelect.value, 10) : 0,
                 lang: getLang()
             })
         });
@@ -253,6 +276,7 @@ downloadBtn.addEventListener('click', async () => {
             titleInput.disabled = false;
             formatSelect.disabled = false;
             qualitySelect.disabled = false;
+            liveSelect.disabled = false;
             progressContainer.classList.add('hidden');
         }, 1500);
     }
